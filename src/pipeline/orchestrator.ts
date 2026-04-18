@@ -14,7 +14,7 @@
  *   idle → listening → processing → thinking → [tool_executing] → responding → speaking → idle
  */
 
-import { eventBus, type STTCommittedEvent, type STTPartialEvent, type LLMChunkEvent } from './events.js';
+import { eventBus, type STTCommittedEvent, type LLMChunkEvent } from './events.js';
 import { VoiceManager } from '../voice/index.js';
 import { Agent } from '../agent/agent.js';
 import { registerBuiltinTools } from '../tools/index.js';
@@ -66,15 +66,9 @@ export class Orchestrator {
    * Wire all event handlers to connect the pipeline
    */
   private wireEvents(): void {
-    // ── Debug: Log partial transcripts ────────────────────────────────
-    eventBus.on('stt:partial', (event: STTPartialEvent) => {
-      console.log(`[Orchestrator] Received stt:partial: "${event.text}"`);
-    });
-
     // ── STT → Agent ──────────────────────────────────────────────────
     // When the user finishes speaking, send the text to the agent
     eventBus.on('stt:committed', async (event: STTCommittedEvent) => {
-      console.log(`[Orchestrator] Received stt:committed: "${event.text}"`);
       if (!this.isRunning) return;
 
       const text = event.text.trim();
@@ -82,6 +76,7 @@ export class Orchestrator {
 
       // Stop listening while processing (optional — can keep listening for interrupt)
       eventBus.transition('processing');
+      this.voice.stopListening();
 
       // Clear response chunks for new interaction
       this.responseChunks = [];
@@ -93,20 +88,23 @@ export class Orchestrator {
         // After agent finishes, speak the response via TTS
         if (store.get('voiceOutputEnabled') && this.responseChunks.length > 0) {
           await this.speakResponse();
-        }
-
-        // Return to listening
-        if (this.isRunning) {
-          eventBus.transition('listening');
+        } else {
+          // No TTS, return to listening immediately
+          this.returnToListening();
         }
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         eventBus.emitError('pipeline', err);
 
         // Return to listening even after error
-        if (this.isRunning) {
-          eventBus.transition('listening');
-        }
+        this.returnToListening();
+      }
+    });
+
+    // ── Resume listening after speaking ───────────────────────────────
+    this.voice.on('speakingDone', () => {
+      if (this.isRunning) {
+        this.returnToListening();
       }
     });
 
@@ -133,7 +131,10 @@ export class Orchestrator {
    */
   private async speakResponse(): Promise<void> {
     const fullText = this.responseChunks.join('');
-    if (!fullText.trim()) return;
+    if (!fullText.trim()) {
+      this.returnToListening();
+      return;
+    }
 
     try {
       await this.voice.speakText(fullText);
@@ -141,6 +142,22 @@ export class Orchestrator {
       // TTS errors shouldn't crash the pipeline
       const err = error instanceof Error ? error : new Error(String(error));
       eventBus.emitError('tts', err);
+      this.returnToListening();
+    }
+  }
+
+  /**
+   * Return to listening state after processing/speaking
+   */
+  private returnToListening(): void {
+    if (!this.isRunning) return;
+
+    eventBus.transition('listening');
+
+    if (store.get('voiceInputEnabled')) {
+      this.voice.startListening().catch((err) => {
+        console.error('[Orchestrator] Failed to restart listening:', err.message);
+      });
     }
   }
 
@@ -151,7 +168,7 @@ export class Orchestrator {
     this.agent.cancel();
     this.voice.interrupt();
     this.responseChunks = [];
-    eventBus.transition('listening');
+    this.returnToListening();
   }
 
   /**
@@ -166,12 +183,13 @@ export class Orchestrator {
 
       if (store.get('voiceOutputEnabled') && this.responseChunks.length > 0) {
         await this.speakResponse();
+      } else {
+        this.returnToListening();
       }
 
-      eventBus.transition('listening');
       return response;
     } catch (error) {
-      eventBus.transition('listening');
+      this.returnToListening();
       throw error;
     }
   }

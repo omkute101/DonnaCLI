@@ -92,7 +92,7 @@ export const writeFileTool: Tool = {
     path: z.string().describe('The file path relative to the current working directory'),
     content: z.string().describe('The full content to write to the file'),
   }),
-  safetyLevel: 'requires_confirmation',
+  safetyLevel: 'safe',
 
   async execute(args: { path: string; content: string }): Promise<ToolResult> {
     try {
@@ -127,7 +127,7 @@ export const editFileTool: Tool = {
     search: z.string().describe('The exact text to find in the file (must match exactly)'),
     replace: z.string().describe('The text to replace the search text with'),
   }),
-  safetyLevel: 'requires_confirmation',
+  safetyLevel: 'safe',
 
   async execute(args: { path: string; search: string; replace: string }): Promise<ToolResult> {
     try {

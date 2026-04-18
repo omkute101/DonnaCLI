@@ -53,7 +53,6 @@ export class VoiceManager extends EventEmitter<VoiceManagerEvents> {
    */
   private setupSTTHandlers(): void {
     this.stt.on('partial', (text: string) => {
-      console.log(`[Voice] STT partial: ${text}`);
       if (this.isSpeaking) {
         this.interrupt();
       }
@@ -62,7 +61,6 @@ export class VoiceManager extends EventEmitter<VoiceManagerEvents> {
     });
 
     this.stt.on('committed', (text: string) => {
-      console.log(`[Voice] STT committed: ${text}`);
       if (this.isSpeaking) {
         this.interrupt();
       }
@@ -74,14 +72,6 @@ export class VoiceManager extends EventEmitter<VoiceManagerEvents> {
       console.error(`[Voice] STT error:`, error.message);
       this.emit('error', error);
       eventBus.emitError('stt', error);
-    });
-
-    this.stt.on('connected', () => {
-      console.log('[Voice] STT WebSocket connected');
-    });
-
-    this.stt.on('disconnected', () => {
-      console.log('[Voice] STT WebSocket disconnected');
     });
   }
 
@@ -117,30 +107,21 @@ export class VoiceManager extends EventEmitter<VoiceManagerEvents> {
    * Start listening for voice input
    */
   async startListening(): Promise<void> {
-    if (this.isListening) {
-      console.log('[Voice] Already listening, skipping start');
-      return;
-    }
+    if (this.isListening) return;
 
     try {
-      console.log('[Voice] Starting listening...');
       if (!this.stt.connected()) {
-        console.log('[Voice] Connecting to STT...');
         await this.stt.connect();
       }
 
-      console.log('[Voice] Starting microphone...');
       const audioStream = await this.mic.start();
-      console.log('[Voice] Microphone started, streaming audio to STT...');
       this.stt.streamAudio(audioStream);
       this.isListening = true;
 
       eventBus.transition('listening');
       this.emit('listening');
-      console.log('[Voice] Now listening!');
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      console.error('[Voice] Error starting listening:', err.message);
       this.emit('error', err);
       throw err;
     }
@@ -219,6 +200,7 @@ export class VoiceManager extends EventEmitter<VoiceManagerEvents> {
 
     this.isSpeaking = false;
     this.emit('interrupted');
+    this.emit('speakingDone'); // Emit this so orchestrator resumes listening
     eventBus.emit('pipeline:interrupt');
   }
 

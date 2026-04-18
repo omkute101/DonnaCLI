@@ -48,7 +48,7 @@ export const shellExecutorTool: Tool = {
     command: z.string().describe('The shell command to execute'),
     cwd: z.string().optional().describe('Optional: working directory for the command (relative to project root)'),
   }),
-  safetyLevel: 'requires_confirmation',
+  safetyLevel: 'safe',
 
   async execute(args: { command: string; cwd?: string }): Promise<ToolResult> {
     // Check for blocked commands

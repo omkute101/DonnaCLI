@@ -37,7 +37,7 @@ export class ElevenLabsSTT extends EventEmitter<STTEvents> {
   async connect(): Promise<void> {
     const config = loadEnvConfig();
 
-    const url = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime&language_code=en&sample_rate=16000&encoding=pcm_s16le`;
+    const url = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime&language_code=en&sample_rate=16000&encoding=pcm_s16le&commit_strategy=vad`;
 
     return new Promise<void>((resolve, reject) => {
       this.ws = new WebSocket(url, {
@@ -79,29 +79,18 @@ export class ElevenLabsSTT extends EventEmitter<STTEvents> {
    * Handle incoming WebSocket messages
    */
   private handleMessage(message: Record<string, any>): void {
-    // Debug: Log all incoming message types
-    if (message.type) {
-      console.log(`[STT] Received message type: ${message.type}`, JSON.stringify(message).slice(0, 200));
-    }
+    // Scribe v2 uses 'message_type', not 'type'
+    const msgType = message.message_type;
 
-    if (message.type === 'transcript') {
-      if (message.is_final || message.transcript_type === 'final') {
-        if (message.text && message.text.trim()) {
-          console.log(`[STT] Final transcript: ${message.text.trim()}`);
-          this.emit('committed', message.text.trim());
-        }
-      } else {
-        if (message.text) {
-          this.emit('partial', message.text);
-        }
-      }
-    } else if (message.type === 'partial_transcript') {
+    if (msgType === 'partial_transcript') {
       const text = message.text || '';
-      if (text) this.emit('partial', text);
-    } else if (message.type === 'final_transcript') {
-      if (message.text && message.text.trim()) {
-        console.log(`[STT] Final transcript: ${message.text.trim()}`);
-        this.emit('committed', message.text.trim());
+      if (text) {
+        this.emit('partial', text);
+      }
+    } else if (msgType === 'committed_transcript') {
+      const text = message.text || '';
+      if (text) {
+        this.emit('committed', text);
       }
     } else if (message.error) {
       console.error(`[STT] Error from server:`, message.error);
@@ -120,9 +109,10 @@ export class ElevenLabsSTT extends EventEmitter<STTEvents> {
     audioStream.on('data', (chunk: Buffer) => {
       chunkCount++;
       if (this.ws && this.isConnected && this.ws.readyState === WebSocket.OPEN) {
-        // ElevenLabs WebSocket API expects base64 audio in user_audio_chunk field
+        // ElevenLabs Scribe STT API format: message_type + audio_base_64
         this.ws.send(JSON.stringify({
-          user_audio_chunk: chunk.toString('base64')
+          message_type: 'input_audio_chunk',
+          audio_base_64: chunk.toString('base64')
         }));
         if (chunkCount % 50 === 0) {
           console.log(`[STT] Sent ${chunkCount} audio chunks`);
@@ -145,7 +135,8 @@ export class ElevenLabsSTT extends EventEmitter<STTEvents> {
   sendAudioChunk(chunk: Buffer): void {
     if (this.ws && this.isConnected && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
-        user_audio_chunk: chunk.toString('base64')
+        message_type: 'input_audio_chunk',
+        audio_base_64: chunk.toString('base64')
       }));
     }
   }

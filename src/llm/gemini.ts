@@ -41,10 +41,42 @@ export class GeminiProvider implements LLMProvider {
     // Format tools for Gemini
     const geminiTools: GenAITool[] = [];
     if (tools.length > 0) {
+      // Helper function to sanitize JSON schema for Gemini's strict proto format
+      const sanitizeSchema = (schema: any): any => {
+        if (!schema || typeof schema !== 'object') return schema;
+        if (Array.isArray(schema)) return schema.map(sanitizeSchema);
+
+        const clean = { ...schema };
+
+        // 1. Gemini strictly forbids these keys
+        delete clean.$schema;
+        delete clean.additionalProperties;
+        delete clean.default;
+
+        // 2. Gemini doesn't support arrays for 'type' (e.g., ["string", "null"])
+        if (Array.isArray(clean.type)) {
+          clean.type = clean.type.find((t: string) => t !== 'null') || 'string';
+        }
+
+        // 3. Recursively clean nested properties
+        if (clean.properties) {
+          for (const key of Object.keys(clean.properties)) {
+            clean.properties[key] = sanitizeSchema(clean.properties[key]);
+          }
+        }
+
+        // 4. Recursively clean array items
+        if (clean.items) {
+          clean.items = sanitizeSchema(clean.items);
+        }
+
+        return clean;
+      };
+
       const declarations: FunctionDeclaration[] = tools.map((tool) => ({
         name: tool.function.name,
         description: tool.function.description,
-        parameters: tool.function.parameters as any, // Gemini schema is mostly JSON Schema compatible
+        parameters: sanitizeSchema(tool.function.parameters),
       }));
       geminiTools.push({ functionDeclarations: declarations });
     }

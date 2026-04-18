@@ -48,23 +48,45 @@ export class Microphone {
     const imported = await import('node-record-lpcm16');
     const recorder = imported.default || imported;
 
+    // Try sox first, fallback to arecord
+    let recorderCmd = 'sox';
+    try {
+      // Check if sox is available
+      const { execSync } = await import('child_process');
+      execSync('which sox', { stdio: 'ignore' });
+    } catch {
+      recorderCmd = 'arecord';
+      console.log('[Microphone] sox not found, using arecord fallback');
+    }
+
     const options: RecordOptions = {
       sampleRate: this.config.sampleRate,
       channels: this.config.channels,
       threshold: this.config.threshold,
-      silence: '2.0',   // seconds of silence before auto-stop (we manage this ourselves)
-      recorder: 'sox',   // or 'arecord' on Linux without sox
+      silence: '2.0',
+      recorder: recorderCmd,
     };
 
-    this.recording = recorder.record(options);
-    this.stream = this.recording.stream();
+    try {
+      this.recording = recorder.record(options);
+      this.stream = this.recording.stream();
 
-    // Handle errors gracefully
-    this.stream!.on('error', (err: Error) => {
-      console.error('Microphone error:', err.message);
-    });
+      // Handle stream errors
+      this.stream!.on('error', (err: any) => {
+        const errorMsg = err?.message || err?.toString() || 'Unknown stream error';
+        console.error('[Microphone Stream] Error:', errorMsg);
+      });
 
-    return this.stream!;
+      this.stream!.on('close', () => {
+        console.log('[Microphone] Stream closed');
+      });
+
+      return this.stream!;
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error('[Microphone] Failed to start:', errMsg);
+      throw new Error(`Failed to start microphone: ${errMsg}. Make sure sox or alsa-utils is installed.`);
+    }
   }
 
   /**
